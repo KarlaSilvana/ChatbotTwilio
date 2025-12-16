@@ -1,81 +1,82 @@
 require('dotenv').config()
+const express = require('express')
+const twilio = require('twilio')
 
-const { createBot, createProvider, createFlow, addKeyword, EVENTS } = require('@bot-whatsapp/bot')
-const { TwilioProvider } = require('@bot-whatsapp/provider-twilio')
-const MockAdapter = require('@bot-whatsapp/database/mock')
+const app = express()
+app.use(express.urlencoded({ extended: false }))
+app.use(express.json())
 
-// Flow principal que captura todo
-const flowPrincipal = addKeyword(EVENTS.WELCOME)
-    .addAnswer('✅ Mensaje recibido', { delay: 300 })
-    .addAnswer(null, { delay: 500 }, async (ctx, { flowDynamic }) => {
-        console.log('📨 De:', ctx.from, '| Mensaje:', ctx.body)
-        await flowDynamic(`Escribiste: "${ctx.body}"`)
-    })
-
-// Comandos específicos
-const flowHola = addKeyword(['hola', 'hi', 'buenas', 'hey'])
-    .addAnswer('👋 ¡Hola! ¿Cómo estás?')
-
-const flowTest = addKeyword(['test', 'prueba'])
-    .addAnswer('🎉 ¡Bot funcionando!')
-    .addAnswer('Todo está operativo ✅')
-
-const flowHora = addKeyword(['hora', 'tiempo'])
-    .addAnswer('⏰ Hora actual:', null, async (ctx, { flowDynamic }) => {
-        const hora = new Date().toLocaleString('es-PE', {
-            timeZone: 'America/Lima',
-            hour: '2-digit',
-            minute: '2-digit'
-        })
-        await flowDynamic(`🕐 ${hora}`)
-    })
-
-const flowAyuda = addKeyword(['ayuda', 'help', 'menu'])
-    .addAnswer('📋 Comandos disponibles:')
-    .addAnswer('• hola - Saludo')
-    .addAnswer('• test - Probar bot')
-    .addAnswer('• hora - Ver hora')
-    .addAnswer('• ayuda - Este menú')
-
-const main = async () => {
-    const adapterDB = new MockAdapter()
-    
-    const adapterFlow = createFlow([
-        flowHola,
-        flowTest,
-        flowHora,
-        flowAyuda,
-        flowPrincipal
-    ])
-    
-    const adapterProvider = createProvider(TwilioProvider, {
-        accountSid: process.env.TWILIO_ACCOUNT_SID,
-        authToken: process.env.TWILIO_AUTH_TOKEN,
-        vendorNumber: process.env.TWILIO_PHONE_NUMBER,
-        port: 3000
-    })
-
-    const bot = createBot({
-        flow: adapterFlow,
-        provider: adapterProvider,
-        database: adapterDB,
-    })
-
-    // Agregar headers correctos para Twilio
-    const server = bot.httpServer
-    if (server && server._events && server._events.request) {
-        const originalHandler = server._events.request
-        server._events.request = (req, res) => {
-            res.setHeader('Content-Type', 'text/xml')
-            originalHandler(req, res)
-        }
-    }
-
-    console.log('\n🤖 BOT ACTIVO')
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━')
-    console.log('📞 Puerto: 3000')
-    console.log('🌐 IP: 54.90.168.254')
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━\n')
+// Comandos del bot
+const commands = {
+    'test': '🎉 ¡Bot funcionando perfectamente! ✅',
+    'prueba': '🎉 ¡Bot funcionando perfectamente! ✅',
+    'hola': '👋 ¡Hola! ¿Cómo estás?\n\nEscribe "ayuda" para ver los comandos.',
+    'hi': '👋 ¡Hola! ¿Cómo estás?\n\nEscribe "ayuda" para ver los comandos.',
+    'ayuda': '📋 *Comandos disponibles:*\n\n• test - Probar bot\n• hola - Saludo\n• hora - Ver hora actual\n• ayuda - Este menú',
+    'help': '📋 *Comandos disponibles:*\n\n• test - Probar bot\n• hola - Saludo\n• hora - Ver hora actual\n• ayuda - Este menú',
+    'menu': '📋 *Comandos disponibles:*\n\n• test - Probar bot\n• hola - Saludo\n• hora - Ver hora actual\n• ayuda - Este menú'
 }
 
-main()
+// Función para obtener hora
+const getHora = () => {
+    const ahora = new Date()
+    return ahora.toLocaleString('es-PE', {
+        timeZone: 'America/Lima',
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+    })
+}
+
+// Webhook de Twilio
+app.post('/twilio-hook', (req, res) => {
+    const { Body, From, To } = req.body
+    const mensaje = (Body || '').toLowerCase().trim()
+    
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+    console.log('📨 MENSAJE RECIBIDO')
+    console.log('🕐 Hora:', new Date().toLocaleString('es-PE'))
+    console.log('📱 De:', From)
+    console.log('📝 Mensaje:', Body)
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+    
+    // Crear respuesta TwiML
+    const twiml = new twilio.twiml.MessagingResponse()
+    
+    // Procesar comandos
+    if (mensaje === 'hora' || mensaje === 'tiempo') {
+        twiml.message(`⏰ Hora actual:\n\n🕐 ${getHora()}`)
+    } else if (commands[mensaje]) {
+        twiml.message(commands[mensaje])
+    } else {
+        // Respuesta por defecto (echo)
+        twiml.message(`✅ Mensaje recibido\n\nEscribiste: "${Body}"\n\nEscribe "ayuda" para ver los comandos.`)
+    }
+    
+    console.log('✅ Respuesta enviada\n')
+    
+    // IMPORTANTE: Enviar con Content-Type correcto
+    res.type('text/xml')
+    res.send(twiml.toString())
+})
+
+// Ruta de prueba
+app.get('/', (req, res) => {
+    res.send('🤖 Bot Twilio funcionando correctamente')
+})
+
+// Iniciar servidor
+const PORT = 3000
+app.listen(PORT, '0.0.0.0', () => {
+    console.log('\n🤖 BOT TWILIO ACTIVO')
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+    console.log('📞 Puerto:', PORT)
+    console.log('🌐 IP: 54.90.168.254')
+    console.log('🔗 Webhook: /twilio-hook')
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+    console.log('\n💬 Envía "test" para probar\n')
+})
